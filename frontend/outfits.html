@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Outfits</title>
+    <link rel="stylesheet" href="/frontend/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="row">
+        <h1>Outfit Generator + Scoring</h1>
+        <a class="link" href="/">Home</a>
+      </header>
+
+      <section class="panel">
+        <div class="row wrap">
+          <div>
+            <div class="muted small">Personalization level</div>
+            <div class="row wrap" style="justify-content:flex-start">
+              <span id="persBadge" class="badge">—</span>
+              <span id="persHint" class="muted small"></span>
+            </div>
+          </div>
+          <div style="flex: 1"></div>
+          <a class="btn secondary" href="/frontend/profile.html">Edit profile</a>
+        </div>
+        <div id="persChecks" class="checks"></div>
+      </section>
+
+      <section class="panel">
+        <div class="row wrap">
+          <label>
+            <div class="muted small">Start date</div>
+            <input id="startDate" type="date" />
+          </label>
+          <label>
+            <div class="muted small">Days</div>
+            <input id="days" type="number" min="1" max="14" value="7" />
+          </label>
+          <button id="generateBtn" class="btn">Generate outfits</button>
+          <button id="refreshWardrobeBtn" class="btn secondary">Refresh wardrobe map</button>
+          <span id="wardrobeMsg" class="muted small"></span>
+        </div>
+        <div id="errorBox" class="error hidden"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Results</h2>
+        <div id="results"></div>
+      </section>
+    </main>
+
+    <script src="/frontend/app.js"></script>
+    <script>
+      const startDate = document.getElementById("startDate");
+      const days = document.getElementById("days");
+      const generateBtn = document.getElementById("generateBtn");
+      const refreshWardrobeBtn = document.getElementById("refreshWardrobeBtn");
+      const results = document.getElementById("results");
+      const errorBox = document.getElementById("errorBox");
+      const wardrobeMsg = document.getElementById("wardrobeMsg");
+
+      const persBadge = document.getElementById("persBadge");
+      const persHint = document.getElementById("persHint");
+      const persChecks = document.getElementById("persChecks");
+
+      startDate.value = fmtDateISO(new Date());
+
+      let wardrobeState = { map: new Map(), tops: [], bottoms: [] };
+      let wardrobeDisplayMap = new Map(); // may include inactive items for rendering historical outfits
+      let bodyProfile = null;
+      let feedbackTouched = false;
+
+      function showError(msg) {
+        errorBox.textContent = msg;
+        errorBox.classList.remove("hidden");
+      }
+      function clearError() {
+        errorBox.textContent = "";
+        errorBox.classList.add("hidden");
+      }
+
+      function showWardrobeMsg(text) {
+        wardrobeMsg.textContent = text || "";
+        if (!text) return;
+        setTimeout(() => {
+          if (wardrobeMsg.textContent === text) wardrobeMsg.textContent = "";
+        }, 1400);
+      }
+
+      function hasFeedbackSignalFromWardrobe() {
+        const items = Array.from(wardrobeDisplayMap.values());
+        return items.some((it) => (Number(it.wear_count || 0) > 0) || Boolean(it.last_worn_at));
+      }
+
+      function renderPersonalization(status) {
+        persBadge.textContent = status.level;
+        persBadge.classList.toggle("basic", status.level === "Basic");
+        persBadge.classList.toggle("medium", status.level === "Medium");
+        persBadge.classList.toggle("high", status.level === "High");
+
+        persHint.textContent = `(signals active: ${status.score}/4)`;
+
+        const rows = [
+          ["Fit preference", status.features.fit_preference],
+          ["Body shape", status.features.body_shape],
+          ["Skin tone", status.features.skin_tone],
+          ["Feedback signals", status.features.feedback],
+        ];
+        persChecks.innerHTML = "";
+        rows.forEach(([label, ok]) => {
+          const div = document.createElement("div");
+          div.className = "checkRow";
+          div.innerHTML = `
+            <span class="${ok ? "checkOk" : "checkNo"}">${ok ? "✓" : "✗"}</span>
+            <span>${label}</span>
+          `;
+          persChecks.appendChild(div);
+        });
+      }
+
+      async function refreshPersonalization() {
+        try {
+          bodyProfile = await apiFetch("/body-profile", { method: "GET" });
+        } catch (e) {
+          bodyProfile = null;
+        }
+        const hasFeedback = feedbackTouched || hasFeedbackSignalFromWardrobe();
+        const status = computePersonalizationStatus(bodyProfile, hasFeedback);
+        renderPersonalization(status);
+      }
+
+      async function refreshWardrobeMap() {
+        const res = await apiFetch("/wardrobe?include_inactive=false");
+        const items = res.items || [];
+        const map = new Map(items.map((it) => [it.id, it]));
+        const activeItems = items.filter((it) => it.is_active);
+        const activeTops = activeItems.filter((it) => it.category === "top");
+        const activeBottoms = activeItems.filter((it) => it.category === "bottom");
+
+        // Backend eligibility gate: item_type must be known (non-"unknown")
+        const eligibleTops = activeTops.filter((it) => it.item_type && it.item_type !== "unknown");
+        const eligibleBottoms = activeBottoms.filter((it) => it.item_type && it.item_type !== "unknown");
+
+        wardrobeState = {
+          map,
+          tops: eligibleTops,
+          bottoms: eligibleBottoms,
+          activeTopCount: activeTops.length,
+          activeBottomCount: activeBottoms.length,
+        };
+        wardrobeDisplayMap = map;
+        showWardrobeMsg(
+          `Wardrobe refreshed (eligible tops: ${eligibleTops.length}/${activeTops.length}, eligible bottoms: ${eligibleBottoms.length}/${activeBottoms.length})`
+        );
+        await refreshPersonalization();
+      }
+
+      async function ensureDisplayMapHas(ids) {
+        const missing = (ids || []).filter((id) => !wardrobeDisplayMap.has(id));
+        if (missing.length === 0) return;
+
+        // Historical outfits may reference inactive items. Fetch full wardrobe for rendering only.
+        const res = await apiFetch("/wardrobe?include_inactive=true");
+        const items = res.items || [];
+        wardrobeDisplayMap = new Map(items.map((it) => [it.id, it]));
+        showWardrobeMsg("Wardrobe refreshed (including inactive for rendering)");
+        await refreshPersonalization();
+      }
+
+      function renderOutfitCard(outfit) {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const header = document.createElement("div");
+        header.className = "row wrap";
+        const finalScore = outfit.final_score ?? outfit.score ?? "—";
+        header.innerHTML = `
+          <div class="mono">${outfit.date}</div>
+          <div class="muted">final_score: <span class="mono">${finalScore}</span></div>
+        `;
+        card.appendChild(header);
+
+        const imgRow = document.createElement("div");
+        imgRow.className = "outfit-items";
+
+        const items = (outfit.item_ids || [])
+          .map((id) => wardrobeDisplayMap.get(id))
+          .filter(Boolean);
+
+        if (items.length === 0) {
+          const missing = document.createElement("div");
+          missing.className = "muted small";
+          missing.textContent = "No matching wardrobe items found for these item_ids (try Refresh wardrobe map).";
+          imgRow.appendChild(missing);
+        } else {
+          items.forEach((it) => {
+            const box = document.createElement("div");
+            box.className = "imgBox";
+            const img = document.createElement("img");
+            img.className = "outfit-img";
+            img.alt = it.item_type || "item";
+            img.src = renderImage(it.image_preview_url || it.image_url);
+            box.appendChild(img);
+
+            const meta = document.createElement("div");
+            meta.className = "muted small";
+            const name = it.item_type && it.item_type !== "unknown" ? it.item_type : (it.category || "item");
+            meta.textContent = `${name} (${it.color || "—"})`;
+            box.appendChild(meta);
+
+            imgRow.appendChild(box);
+          });
+        }
+        card.appendChild(imgRow);
+
+        const expl = outfit.explanation_data || {};
+
+        const summaryEl = document.createElement("div");
+        summaryEl.className = "summary";
+        summaryEl.textContent = summarizeExplanation(expl);
+        card.appendChild(summaryEl);
+
+        const breakdown = document.createElement("div");
+        breakdown.className = "kv";
+        const rs = expl.rule_score ?? "—";
+        const fb = expl.feedback_bias ?? "—";
+        const ed = expl.embedding_diversity_score ?? "—";
+        const fs = expl.fit_score ?? "—";
+        breakdown.innerHTML = `
+          <div><span class="k">rule_score</span> <span class="mono">${rs}</span></div>
+          <div><span class="k">feedback bias</span> <span class="mono">${fb}</span></div>
+          <div><span class="k">embedding diversity</span> <span class="mono">${ed}</span></div>
+          <div><span class="k">fit_score</span> <span class="mono">${fs}</span></div>
+        `;
+        card.appendChild(breakdown);
+
+        const debug = document.createElement("details");
+        const debugSummary = document.createElement("summary");
+        debugSummary.className = "muted small";
+        debugSummary.textContent = "Debug (raw explanation JSON)";
+        debug.appendChild(debugSummary);
+        const pre = document.createElement("pre");
+        pre.className = "pre";
+        pre.textContent = JSON.stringify(expl, null, 2);
+        debug.appendChild(pre);
+        card.appendChild(debug);
+
+        if (outfit.outfit_id) {
+          const fbRow = document.createElement("div");
+          fbRow.className = "row wrap";
+          ["liked", "disliked", "worn", "skipped"].forEach((action) => {
+            const b = document.createElement("button");
+            b.className = action === "disliked" ? "btn small danger" : "btn small";
+            b.textContent = action;
+            b.addEventListener("click", async () => {
+              clearError();
+              try {
+                await apiFetch("/feedback", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ outfit_id: outfit.outfit_id, action }),
+                });
+                feedbackTouched = true;
+                await refreshPersonalization();
+              } catch (e) {
+                showError(e.message);
+              }
+            });
+            fbRow.appendChild(b);
+          });
+          card.appendChild(fbRow);
+        } else {
+          const note = document.createElement("div");
+          note.className = "muted small";
+          note.textContent = "outfit_id not available; feedback buttons disabled.";
+          card.appendChild(note);
+        }
+
+        return card;
+      }
+
+      async function generate() {
+        clearError();
+        results.innerHTML = "";
+        try {
+          await refreshWardrobeMap();
+          if (wardrobeState.tops.length === 0 || wardrobeState.bottoms.length === 0) {
+            const aTops = wardrobeState.activeTopCount ?? 0;
+            const aBottoms = wardrobeState.activeBottomCount ?? 0;
+            throw new Error(
+              `Need at least 1 active top and 1 active bottom with a known item_type (not "unknown"). Eligible tops: ${wardrobeState.tops.length}/${aTops}, eligible bottoms: ${wardrobeState.bottoms.length}/${aBottoms}. Set item types in Wardrobe, then refresh.`
+            );
+          }
+          const sd = startDate.value;
+          const d = Number(days.value || 7);
+          const res = await apiFetch(`/outfits/generate?start_date=${encodeURIComponent(sd)}&days=${encodeURIComponent(d)}`, {
+            method: "POST",
+          });
+
+          const outfits = res.outfits || [];
+          const allIds = outfits.flatMap((o) => o.item_ids || []);
+          await ensureDisplayMapHas(allIds);
+
+          outfits.forEach((o) => results.appendChild(renderOutfitCard(o)));
+          if (!res.outfits || res.outfits.length === 0) {
+            results.textContent = "No outfits generated.";
+          }
+        } catch (e) {
+          showError(e.message);
+        }
+      }
+
+      generateBtn.addEventListener("click", generate);
+      refreshWardrobeBtn.addEventListener("click", async () => {
+        clearError();
+        try {
+          await refreshWardrobeMap();
+        } catch (e) {
+          showError(e.message);
+        }
+      });
+
+      refreshWardrobeMap().catch(() => {});
+    </script>
+  </body>
+</html>

@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Body Profile (Wizard)</title>
+    <link rel="stylesheet" href="/frontend/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="row">
+        <h1>Body Profile (Wizard)</h1>
+        <a class="link" href="/">Home</a>
+      </header>
+
+      <section class="panel">
+        <div class="stepper" id="stepper">
+          <button class="step active" data-step="0" type="button">1. Identity</button>
+          <button class="step" data-step="1" type="button">2. Body shape</button>
+          <button class="step" data-step="2" type="button">3. Fit preference</button>
+          <button class="step" data-step="3" type="button">4. Skin tone</button>
+          <button class="step" data-step="4" type="button">5. Review</button>
+        </div>
+        <div class="muted small">
+          All fields are optional. Values are self-declared and only used for explainable personalization (no ML inference).
+        </div>
+      </section>
+
+      <section class="panel">
+        <div id="errorBox" class="error hidden"></div>
+        <div id="statusBox" class="statusLine muted small"></div>
+
+        <!-- STEP 1 -->
+        <div class="wizardStep" data-step="0">
+          <h2>Basic Identity</h2>
+          <div class="formGrid">
+            <label>
+              <div class="muted small">User name</div>
+              <input id="userName" type="text" placeholder="e.g., Alex" maxlength="80" />
+            </label>
+
+            <label>
+              <div class="muted small">Age (optional)</div>
+              <input id="age" type="number" min="10" max="100" placeholder="10–100" />
+            </label>
+          </div>
+
+          <div class="muted small" style="margin-top: 10px">Sex</div>
+          <div class="radioRow" id="sexRadios">
+            <label class="radio"><input type="radio" name="sex" value="male" /> male</label>
+            <label class="radio"><input type="radio" name="sex" value="female" /> female</label>
+            <label class="radio"><input type="radio" name="sex" value="other" /> other</label>
+            <label class="radio"><input type="radio" name="sex" value="prefer_not_to_say" /> prefer not to say</label>
+          </div>
+        </div>
+
+        <!-- STEP 2 -->
+        <div class="wizardStep hidden" data-step="1">
+          <h2>Body Shape (select one)</h2>
+          <div class="muted small">
+            Pick the silhouette that looks closest to you. This is self-declared and used only for future fit rules (not scoring yet).
+          </div>
+
+          <div class="cardGrid" id="bodyShapeGrid"></div>
+        </div>
+
+        <!-- STEP 3 -->
+        <div class="wizardStep hidden" data-step="2">
+          <h2>Fit Preference (used in scoring)</h2>
+          <div class="muted small">How do you prefer clothes to fit on you?</div>
+          <div class="cardGrid" id="fitPrefGrid"></div>
+        </div>
+
+        <!-- STEP 4 -->
+        <div class="wizardStep hidden" data-step="3">
+          <h2>Skin Tone (optional)</h2>
+          <div class="muted small">
+            Optional. Used only for future color recommendations. Not used in scoring yet.
+          </div>
+          <div class="swatchGrid" id="skinToneGrid"></div>
+        </div>
+
+        <!-- STEP 5 -->
+        <div class="wizardStep hidden" data-step="4">
+          <h2>Review</h2>
+          <div class="kv" id="reviewKv"></div>
+          <details style="margin-top: 10px">
+            <summary class="muted small">Debug (raw profile JSON)</summary>
+            <pre class="pre" id="rawJson"></pre>
+          </details>
+        </div>
+
+        <div class="row wrap" style="margin-top: 14px">
+          <button id="backBtn" class="btn secondary" type="button">Back</button>
+          <button id="nextBtn" class="btn" type="button">Next</button>
+          <div style="flex: 1"></div>
+          <button id="saveBtn" class="btn" type="button">Save profile</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="/frontend/app.js"></script>
+    <script>
+      const errorBox = document.getElementById("errorBox");
+      const statusBox = document.getElementById("statusBox");
+
+      const stepper = document.getElementById("stepper");
+      const steps = Array.from(document.querySelectorAll(".wizardStep"));
+      const stepButtons = Array.from(document.querySelectorAll(".stepper .step"));
+      const backBtn = document.getElementById("backBtn");
+      const nextBtn = document.getElementById("nextBtn");
+      const saveBtn = document.getElementById("saveBtn");
+
+      const userName = document.getElementById("userName");
+      const age = document.getElementById("age");
+      const sexRadios = document.getElementById("sexRadios");
+
+      const bodyShapeGrid = document.getElementById("bodyShapeGrid");
+      const fitPrefGrid = document.getElementById("fitPrefGrid");
+      const skinToneGrid = document.getElementById("skinToneGrid");
+
+      const reviewKv = document.getElementById("reviewKv");
+      const rawJson = document.getElementById("rawJson");
+
+      let currentStep = 0;
+      let profile = null;
+      let lastSavedAt = null;
+
+      const BODY_SHAPES = [
+        { value: "slim", label: "Slim", icon: "slim" },
+        { value: "average", label: "Average", icon: "average" },
+        { value: "athletic", label: "Athletic", icon: "athletic" },
+        { value: "broad", label: "Broad", icon: "broad" },
+        { value: "rectangle", label: "Rectangle", icon: "rectangle" },
+        { value: "triangle", label: "Triangle", icon: "triangle" },
+        { value: "inverted_triangle", label: "Inverted triangle", icon: "inverted_triangle" },
+        { value: "oval", label: "Oval", icon: "oval" },
+      ];
+
+      const FIT_PREFS = [
+        { value: "slim", label: "Slim fit" },
+        { value: "regular", label: "Regular" },
+        { value: "loose", label: "Loose" },
+      ];
+
+      const SKIN_TONES = [
+        { value: "very_fair", label: "Very fair", color: "#f7e7d8" },
+        { value: "fair", label: "Fair", color: "#f0d1b2" },
+        { value: "medium", label: "Medium", color: "#d7a57c" },
+        { value: "olive", label: "Olive", color: "#b38a5d" },
+        { value: "brown", label: "Brown", color: "#8a5a3b" },
+        { value: "dark", label: "Dark", color: "#4c2f22" },
+      ];
+
+      function showError(msg) {
+        errorBox.textContent = msg;
+        errorBox.classList.remove("hidden");
+      }
+      function clearError() {
+        errorBox.textContent = "";
+        errorBox.classList.add("hidden");
+      }
+
+      function setStatus(text) {
+        statusBox.textContent = text || "";
+      }
+
+      function fmtTime(d) {
+        const dt = new Date(d);
+        return dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }
+
+      function updateStepperUI() {
+        steps.forEach((el) => el.classList.add("hidden"));
+        const current = steps.find((s) => Number(s.dataset.step) === currentStep);
+        if (current) current.classList.remove("hidden");
+
+        stepButtons.forEach((b) => b.classList.toggle("active", Number(b.dataset.step) === currentStep));
+
+        backBtn.disabled = currentStep === 0;
+        nextBtn.disabled = currentStep === steps.length - 1;
+      }
+
+      function silhouetteSvg(kind) {
+        // Very simple inline SVGs as visual selectors (dev UI, not medically accurate).
+        const common = `viewBox="0 0 80 120" width="72" height="90"`;
+        if (kind === "triangle") {
+          return `<svg ${common}><path d="M40 10 C28 10 24 18 24 28 C24 40 30 44 40 44 C50 44 56 40 56 28 C56 18 52 10 40 10 Z" fill="#2a3242"/><path d="M18 48 L62 48 L74 110 L6 110 Z" fill="#2a3242"/></svg>`;
+        }
+        if (kind === "inverted_triangle") {
+          return `<svg ${common}><path d="M10 48 L70 48 L58 78 L22 78 Z" fill="#2a3242"/><path d="M40 10 C28 10 24 18 24 28 C24 40 30 44 40 44 C50 44 56 40 56 28 C56 18 52 10 40 10 Z" fill="#2a3242"/><path d="M22 78 L58 78 L52 110 L28 110 Z" fill="#2a3242"/></svg>`;
+        }
+        if (kind === "oval") {
+          return `<svg ${common}><path d="M40 10 C28 10 24 18 24 28 C24 40 30 44 40 44 C50 44 56 40 56 28 C56 18 52 10 40 10 Z" fill="#2a3242"/><ellipse cx="40" cy="78" rx="28" ry="34" fill="#2a3242"/></svg>`;
+        }
+        if (kind === "rectangle") {
+          return `<svg ${common}><path d="M40 10 C28 10 24 18 24 28 C24 40 30 44 40 44 C50 44 56 40 56 28 C56 18 52 10 40 10 Z" fill="#2a3242"/><rect x="18" y="48" width="44" height="62" rx="10" fill="#2a3242"/></svg>`;
+        }
+        if (kind === "slim") {
+          return `<svg ${common}><path d="M40 10 C30 10 26 18 26 28 C26 40 32 44 40 44 C48 44 54 40 54 28 C54 18 50 10 40 10 Z" fill="#2a3242"/><rect x="28" y="48" width="24" height="62" rx="10" fill="#2a3242"/></svg>`;
+        }
+        if (kind === "broad") {
+          return `<svg ${common}><path d="M40 10 C28 10 24 18 24 28 C24 40 30 44 40 44 C50 44 56 40 56 28 C56 18 52 10 40 10 Z" fill="#2a3242"/><rect x="14" y="48" width="52" height="62" rx="12" fill="#2a3242"/></svg>`;
+        }
+        if (kind === "athletic") {
+          return `<svg ${common}><path d="M40 10 C28 10 24 18 24 28 C24 40 30 44 40 44 C50 44 56 40 56 28 C56 18 52 10 40 10 Z" fill="#2a3242"/><path d="M16 48 L64 48 L56 78 L24 78 Z" fill="#2a3242"/><rect x="24" y="78" width="32" height="32" rx="10" fill="#2a3242"/></svg>`;
+        }
+        // average fallback
+        return `<svg ${common}><path d="M40 10 C28 10 24 18 24 28 C24 40 30 44 40 44 C50 44 56 40 56 28 C56 18 52 10 40 10 Z" fill="#2a3242"/><rect x="22" y="48" width="36" height="62" rx="12" fill="#2a3242"/></svg>`;
+      }
+
+      function renderBodyShapeCards() {
+        bodyShapeGrid.innerHTML = "";
+        BODY_SHAPES.forEach((s) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "optionCard";
+          btn.dataset.value = s.value;
+          btn.innerHTML = `
+            <div class="optionIcon">${silhouetteSvg(s.icon)}</div>
+            <div class="optionLabel">${s.label}</div>
+          `;
+          btn.addEventListener("click", async () => {
+            clearError();
+            try {
+              await putProfile({ body_shape: s.value });
+              selectCard(bodyShapeGrid, s.value);
+            } catch (e) {
+              showError(e.message);
+            }
+          });
+          bodyShapeGrid.appendChild(btn);
+        });
+      }
+
+      function renderFitPrefCards() {
+        fitPrefGrid.innerHTML = "";
+        FIT_PREFS.forEach((p) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "optionCard compact";
+          btn.dataset.value = p.value;
+          btn.innerHTML = `<div class="optionLabel">${p.label}</div>`;
+          btn.addEventListener("click", async () => {
+            clearError();
+            try {
+              await putProfile({ fit_preference: p.value });
+              selectCard(fitPrefGrid, p.value);
+            } catch (e) {
+              showError(e.message);
+            }
+          });
+          fitPrefGrid.appendChild(btn);
+        });
+      }
+
+      function renderSkinToneSwatches() {
+        skinToneGrid.innerHTML = "";
+        SKIN_TONES.forEach((t) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "swatchCard";
+          btn.dataset.value = t.value;
+          btn.innerHTML = `
+            <div class="swatch" style="background:${t.color}"></div>
+            <div class="swatchLabel">${t.label}</div>
+          `;
+          btn.addEventListener("click", async () => {
+            clearError();
+            try {
+              await putProfile({ skin_tone: t.value });
+              selectCard(skinToneGrid, t.value);
+            } catch (e) {
+              showError(e.message);
+            }
+          });
+          skinToneGrid.appendChild(btn);
+        });
+      }
+
+      function selectCard(container, value) {
+        Array.from(container.querySelectorAll("button")).forEach((b) => {
+          b.classList.toggle("selected", b.dataset.value === value);
+        });
+      }
+
+      function setRadio(name, value) {
+        Array.from(document.querySelectorAll(`input[name="${name}"]`)).forEach((r) => {
+          r.checked = r.value === value;
+        });
+      }
+
+      function buildReview() {
+        const rows = [
+          ["User name", profile?.user_name ?? "—"],
+          ["Sex", profile?.sex ?? "—"],
+          ["Age", profile?.age ?? "—"],
+          ["Body shape", profile?.body_shape ?? "—"],
+          ["Fit preference", profile?.fit_preference ?? "—"],
+          ["Height (cm)", profile?.height_cm ?? "—"],
+          ["Weight (kg)", profile?.weight_kg ?? "—"],
+          ["Skin tone", profile?.skin_tone ?? "—"],
+        ];
+        reviewKv.innerHTML = "";
+        rows.forEach(([k, v]) => {
+          const div = document.createElement("div");
+          div.innerHTML = `<span class="k">${k}</span> <span class="mono">${v}</span>`;
+          reviewKv.appendChild(div);
+        });
+        rawJson.textContent = JSON.stringify(profile, null, 2);
+      }
+
+      async function fetchProfile() {
+        profile = await apiFetch("/body-profile", { method: "GET" });
+        hydrateUI();
+        setStatus("Loaded profile.");
+      }
+
+      async function putProfile(patch) {
+        const res = await apiFetch("/body-profile", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        profile = res;
+        lastSavedAt = new Date();
+        buildReview();
+        setStatus(`Profile saved at ${fmtTime(lastSavedAt)}.`);
+        return res;
+      }
+
+      function hydrateUI() {
+        userName.value = profile?.user_name ?? "";
+        age.value = profile?.age ?? "";
+        setRadio("sex", profile?.sex ?? "");
+        selectCard(bodyShapeGrid, profile?.body_shape ?? "");
+        selectCard(fitPrefGrid, profile?.fit_preference ?? "");
+        selectCard(skinToneGrid, profile?.skin_tone ?? "");
+        buildReview();
+      }
+
+      function goTo(step) {
+        currentStep = Math.max(0, Math.min(step, steps.length - 1));
+        updateStepperUI();
+        if (currentStep === 4) buildReview();
+      }
+
+      // Events: stepper nav
+      stepper.addEventListener("click", (e) => {
+        const btn = e.target.closest("button.step");
+        if (!btn) return;
+        goTo(Number(btn.dataset.step));
+      });
+      backBtn.addEventListener("click", () => goTo(currentStep - 1));
+      nextBtn.addEventListener("click", () => goTo(currentStep + 1));
+
+      // Events: identity autosave
+      userName.addEventListener("blur", async () => {
+        clearError();
+        const val = userName.value.trim();
+        if (profile && val === (profile.user_name || "")) return;
+        try {
+          await putProfile({ user_name: val || null });
+        } catch (e) {
+          showError(e.message);
+        }
+      });
+
+      age.addEventListener("blur", async () => {
+        clearError();
+        const raw = age.value.trim();
+        if (!raw) return; // optional: do not clear server value
+        const v = Number(raw);
+        if (Number.isNaN(v)) return;
+        if (profile && String(profile.age || "") === String(v)) return;
+        try {
+          await putProfile({ age: v });
+        } catch (e) {
+          showError(e.message);
+        }
+      });
+
+      sexRadios.addEventListener("change", async (e) => {
+        clearError();
+        const input = e.target;
+        if (!input || input.name !== "sex") return;
+        try {
+          await putProfile({ sex: input.value });
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+
+      saveBtn.addEventListener("click", async () => {
+        clearError();
+        try {
+          // Save what's currently typed/selected (best effort, all optional)
+          const sex = document.querySelector('input[name="sex"]:checked')?.value;
+          const patch = {};
+          const nameVal = userName.value.trim();
+          if (nameVal) patch.user_name = nameVal;
+          const ageVal = age.value.trim();
+          if (ageVal) patch.age = Number(ageVal);
+          if (sex) patch.sex = sex;
+          if (profile?.body_shape) patch.body_shape = profile.body_shape;
+          if (profile?.fit_preference) patch.fit_preference = profile.fit_preference;
+          if (profile?.skin_tone) patch.skin_tone = profile.skin_tone;
+          await putProfile(patch);
+        } catch (e) {
+          showError(e.message);
+        }
+      });
+
+      // Init
+      renderBodyShapeCards();
+      renderFitPrefCards();
+      renderSkinToneSwatches();
+      updateStepperUI();
+      fetchProfile().catch((e) => showError(e.message));
+    </script>
+  </body>
+</html>
+

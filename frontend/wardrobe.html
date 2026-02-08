@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wardrobe</title>
+    <link rel="stylesheet" href="/frontend/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="row">
+        <h1>Wardrobe</h1>
+        <a class="link" href="/">Home</a>
+      </header>
+
+      <section class="panel">
+        <div class="row">
+          <button id="refreshBtn" class="btn">Refresh</button>
+          <label class="row muted small">
+            <input id="showInactive" type="checkbox" checked />
+            include inactive
+          </label>
+        </div>
+        <div id="errorBox" class="error hidden"></div>
+      </section>
+
+      <section class="panel">
+        <div class="tableWrap">
+          <table class="table" id="table">
+            <thead>
+              <tr>
+                <th>Image</th>
+                <th>Item type</th>
+                <th>Category</th>
+                <th>Color</th>
+                <th>Palette</th>
+                <th>Embedding</th>
+                <th>Active</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/frontend/app.js"></script>
+    <script>
+      const tbody = document.getElementById("tbody");
+      const errorBox = document.getElementById("errorBox");
+      const refreshBtn = document.getElementById("refreshBtn");
+      const showInactive = document.getElementById("showInactive");
+
+      const TOP_TYPES = ["unknown", "shirt", "tshirt", "kurta", "hoodie"];
+      const BOTTOM_TYPES = ["unknown", "jeans", "trousers", "chinos", "shorts"];
+      const editingIds = window.__wardrobeEditingIds || (window.__wardrobeEditingIds = new Set());
+
+      function showError(msg) {
+        errorBox.textContent = msg;
+        errorBox.classList.remove("hidden");
+      }
+      function clearError() {
+        errorBox.textContent = "";
+        errorBox.classList.add("hidden");
+      }
+
+      async function setActive(id, isActive) {
+        await apiFetch(`/wardrobe/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_active: isActive }),
+        });
+      }
+
+      async function setCategory(id, category) {
+        await apiFetch(`/wardrobe/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category }),
+        });
+      }
+
+      async function setItemType(id, itemType) {
+        await apiFetch(`/wardrobe/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ item_type: itemType }),
+        });
+      }
+
+      async function deleteItem(id) {
+        await apiFetch(`/wardrobe/${id}`, { method: "DELETE" });
+      }
+
+      function renderRow(item) {
+        const tr = document.createElement("tr");
+
+        const imgTd = document.createElement("td");
+        const img = document.createElement("img");
+        img.className = "thumb";
+        img.alt = "item";
+        img.src = renderImage(item.image_preview_url || item.image_url);
+        imgTd.appendChild(img);
+        tr.appendChild(imgTd);
+
+        const typeTd = document.createElement("td");
+        const typeWrap = document.createElement("div");
+        typeWrap.className = "cellCol";
+
+        const lockRow = document.createElement("div");
+        lockRow.style.display = "flex";
+        lockRow.style.gap = "8px";
+        lockRow.style.alignItems = "center";
+        lockRow.style.flexWrap = "wrap";
+
+        const lockBadge = document.createElement("span");
+        lockBadge.className = "badge basic";
+        lockBadge.style.padding = "4px 8px";
+
+        const changeBtn = document.createElement("button");
+        changeBtn.className = "btn small secondary hidden";
+        changeBtn.type = "button";
+        changeBtn.addEventListener("click", () => {
+          if (editingIds.has(item.id)) editingIds.delete(item.id);
+          else editingIds.add(item.id);
+          updateLockUI();
+        });
+
+        lockRow.appendChild(lockBadge);
+        lockRow.appendChild(changeBtn);
+
+        const typeSelect = document.createElement("select");
+        typeSelect.className = "select";
+
+        const typeSaved = document.createElement("span");
+        typeSaved.className = "muted small hidden";
+        typeSaved.textContent = "Saved";
+
+        const typeHint = document.createElement("div");
+        typeHint.className = "muted small";
+        typeHint.style.display = "flex";
+        typeHint.style.gap = "8px";
+        typeHint.style.alignItems = "center";
+        typeHint.style.flexWrap = "wrap";
+
+        function allowedTypesForCategory(category) {
+          return category === "bottom" ? BOTTOM_TYPES : TOP_TYPES;
+        }
+
+        function isLocked() {
+          const catOk = item.category === "top" || item.category === "bottom";
+          const typeOk = item.item_type && item.item_type !== "unknown";
+          return catOk && typeOk;
+        }
+
+        function fillTypeOptions() {
+          const allowed = allowedTypesForCategory(item.category);
+          typeSelect.innerHTML = "";
+          allowed.forEach((opt) => {
+            const o = document.createElement("option");
+            o.value = opt;
+            o.textContent = opt;
+            typeSelect.appendChild(o);
+          });
+
+          const current = allowed.includes(item.item_type) ? item.item_type : "unknown";
+          typeSelect.value = current;
+        }
+
+        async function updateItemType(next) {
+          const prev = item.item_type || "unknown";
+          typeSelect.disabled = true;
+          try {
+            await setItemType(item.id, next);
+            item.item_type = next;
+            typeSaved.classList.remove("hidden");
+            setTimeout(() => typeSaved.classList.add("hidden"), 1200);
+            refreshTypeHint();
+            return true;
+          } catch (e) {
+            item.item_type = prev;
+            fillTypeOptions();
+            refreshTypeHint();
+            showError(e.message);
+            return false;
+          } finally {
+            typeSelect.disabled = false;
+          }
+        }
+
+        let categorySelectRef = null;
+        function updateLockUI() {
+          const locked = isLocked();
+          const editing = editingIds.has(item.id);
+          const disabled = locked && !editing;
+
+          if (locked) {
+            lockBadge.className = "badge basic";
+            lockBadge.textContent = "Ready";
+          } else {
+            lockBadge.className = "badge medium";
+            lockBadge.textContent = "Needs review ⚠";
+          }
+
+          changeBtn.classList.toggle("hidden", !locked);
+          changeBtn.textContent = editing ? "Done" : "Change";
+
+          typeSelect.disabled = disabled;
+          if (categorySelectRef) categorySelectRef.disabled = disabled;
+        }
+
+        function refreshTypeHint() {
+          const suggested = item.suggested_item_type;
+          const conf = item.suggested_item_type_confidence;
+          const allowed = allowedTypesForCategory(item.category);
+
+          if (!suggested || !allowed.includes(suggested)) {
+            typeHint.textContent = "";
+            return;
+          }
+
+          const pct = typeof conf === "number" ? ` (${Math.round(conf * 100)}%)` : "";
+          const same = (item.item_type || "unknown") === suggested;
+
+          typeHint.innerHTML = "";
+          const label = document.createElement("span");
+          label.textContent = `Suggested: ${suggested}${pct}`;
+          typeHint.appendChild(label);
+
+          if (!same) {
+            const btn = document.createElement("button");
+            btn.className = "btn small secondary";
+            btn.type = "button";
+            btn.textContent = "Apply";
+            btn.addEventListener("click", async () => {
+              clearError();
+              btn.disabled = true;
+              typeSelect.value = suggested;
+              await updateItemType(suggested);
+              btn.disabled = false;
+            });
+            typeHint.appendChild(btn);
+          }
+        }
+
+        fillTypeOptions();
+        refreshTypeHint();
+
+        typeSelect.addEventListener("change", async () => {
+          clearError();
+          await updateItemType(typeSelect.value);
+          updateLockUI();
+        });
+
+        typeWrap.appendChild(lockRow);
+        typeWrap.appendChild(typeSelect);
+        typeWrap.appendChild(typeSaved);
+        typeWrap.appendChild(typeHint);
+        typeTd.appendChild(typeWrap);
+        tr.appendChild(typeTd);
+
+        const catTd = document.createElement("td");
+        const categoryWrap = document.createElement("div");
+        categoryWrap.className = "cellCol";
+
+        const categorySelect = document.createElement("select");
+        categorySelect.className = "select";
+        ["top", "bottom"].forEach((opt) => {
+          const o = document.createElement("option");
+          o.value = opt;
+          o.textContent = opt;
+          categorySelect.appendChild(o);
+        });
+        categorySelect.value = item.category === "bottom" ? "bottom" : "top";
+        categorySelectRef = categorySelect;
+
+        const saved = document.createElement("span");
+        saved.className = "muted small hidden";
+        saved.textContent = "Saved";
+
+        categorySelect.addEventListener("change", async () => {
+          clearError();
+          const prev = item.category;
+          const next = categorySelect.value;
+          categorySelect.disabled = true;
+          try {
+            await setCategory(item.id, next);
+            item.category = next;
+            fillTypeOptions();
+            refreshTypeHint();
+            updateLockUI();
+            saved.classList.remove("hidden");
+            setTimeout(() => saved.classList.add("hidden"), 1200);
+          } catch (e) {
+            item.category = prev;
+            categorySelect.value = prev === "bottom" ? "bottom" : "top";
+            showError(e.message);
+          } finally {
+            categorySelect.disabled = false;
+          }
+        });
+
+        categoryWrap.appendChild(categorySelect);
+        categoryWrap.appendChild(saved);
+        catTd.appendChild(categoryWrap);
+        tr.appendChild(catTd);
+
+        updateLockUI();
+
+        const colorTd = document.createElement("td");
+        colorTd.textContent = item.color ?? "—";
+        tr.appendChild(colorTd);
+
+        const palTd = document.createElement("td");
+        palTd.textContent = Array.isArray(item.color_palette) ? item.color_palette.join(", ") : "—";
+        tr.appendChild(palTd);
+
+        const embTd = document.createElement("td");
+        embTd.textContent = item.has_embedding ? `yes (${item.embedding_dim ?? "?"})` : "no";
+        tr.appendChild(embTd);
+
+        const activeTd = document.createElement("td");
+        activeTd.textContent = item.is_active ? "true" : "false";
+        tr.appendChild(activeTd);
+
+        const actionsTd = document.createElement("td");
+        actionsTd.className = "actions";
+
+        const toggleBtn = document.createElement("button");
+        toggleBtn.className = "btn small";
+        toggleBtn.textContent = item.is_active ? "Deactivate" : "Activate";
+        toggleBtn.addEventListener("click", async () => {
+          clearError();
+          try {
+            await setActive(item.id, !item.is_active);
+            await load();
+          } catch (e) {
+            showError(e.message);
+          }
+        });
+        actionsTd.appendChild(toggleBtn);
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "btn small danger";
+        delBtn.textContent = "Delete";
+        delBtn.addEventListener("click", async () => {
+          clearError();
+          if (!confirm("Soft-delete this item (set inactive)?")) return;
+          try {
+            await deleteItem(item.id);
+            await load();
+          } catch (e) {
+            showError(e.message);
+          }
+        });
+        actionsTd.appendChild(delBtn);
+
+        tr.appendChild(actionsTd);
+        return tr;
+      }
+
+      async function load() {
+        clearError();
+        tbody.innerHTML = "";
+        const include = showInactive.checked ? "true" : "false";
+        try {
+          const res = await apiFetch(`/wardrobe?include_inactive=${include}`);
+          (res.items || []).forEach((item) => tbody.appendChild(renderRow(item)));
+        } catch (e) {
+          showError(e.message);
+        }
+      }
+
+      refreshBtn.addEventListener("click", load);
+      showInactive.addEventListener("change", load);
+      load();
+    </script>
+  </body>
+</html>

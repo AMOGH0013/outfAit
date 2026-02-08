@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scan + Vision Debug</title>
+    <link rel="stylesheet" href="/frontend/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="row">
+        <h1>Scan + Vision Debug</h1>
+        <a class="link" href="/">Home</a>
+      </header>
+
+      <section class="panel">
+        <div class="row">
+          <button id="startScanBtn" class="btn">Start Scan</button>
+          <div class="status">
+            <div>Scan ID: <span id="scanId" class="mono">—</span></div>
+            <div>Status: <span id="scanStatus">—</span></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <input id="fileInput" type="file" accept="image/*" disabled />
+          <button id="uploadBtn" class="btn" disabled>Upload Image</button>
+        </div>
+
+        <div id="errorBox" class="error hidden"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Results</h2>
+        <div class="grid-2">
+          <div>
+            <h3>Original</h3>
+            <img id="origImg" class="preview" alt="Original preview" />
+          </div>
+          <div>
+            <h3>Mask</h3>
+            <img id="maskImg" class="preview" alt="Mask preview" />
+            <div class="muted small">
+              Mask URL: <a id="maskUrl" class="mono" target="_blank" rel="noreferrer">—</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="kv">
+            <div><span class="k">Extracted color</span> <span id="colorVal">—</span></div>
+            <div><span class="k">Color confidence</span> <span id="colorConf">—</span></div>
+          </div>
+          <div>
+            <div class="k">Color palette</div>
+            <ul id="paletteList" class="list"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <details>
+          <summary class="muted small">Debug (created item IDs)</summary>
+          <ul id="createdIds" class="list"></ul>
+        </details>
+      </section>
+    </main>
+
+    <script src="/frontend/app.js"></script>
+    <script>
+      const startScanBtn = document.getElementById("startScanBtn");
+      const uploadBtn = document.getElementById("uploadBtn");
+      const fileInput = document.getElementById("fileInput");
+      const scanIdEl = document.getElementById("scanId");
+      const scanStatusEl = document.getElementById("scanStatus");
+      const errorBox = document.getElementById("errorBox");
+
+      const origImg = document.getElementById("origImg");
+      const maskImg = document.getElementById("maskImg");
+      const maskUrlA = document.getElementById("maskUrl");
+
+      const colorVal = document.getElementById("colorVal");
+      const colorConf = document.getElementById("colorConf");
+      const paletteList = document.getElementById("paletteList");
+      const createdIds = document.getElementById("createdIds");
+
+      let scanId = null;
+
+      function resetResults() {
+        origImg.removeAttribute("src");
+        maskImg.removeAttribute("src");
+        maskUrlA.textContent = "—";
+        maskUrlA.removeAttribute("href");
+        colorVal.textContent = "—";
+        colorConf.textContent = "—";
+        paletteList.innerHTML = "";
+        createdIds.innerHTML = "";
+      }
+
+      function showError(msg) {
+        errorBox.textContent = msg;
+        errorBox.classList.remove("hidden");
+      }
+
+      function clearError() {
+        errorBox.textContent = "";
+        errorBox.classList.add("hidden");
+      }
+
+      startScanBtn.addEventListener("click", async () => {
+        clearError();
+        resetResults();
+        scanStatusEl.textContent = "starting…";
+        try {
+          const res = await apiFetch("/scan/start", { method: "POST" });
+          scanId = res.scan_id;
+          scanIdEl.textContent = scanId;
+          scanStatusEl.textContent = res.status || "pending";
+          fileInput.disabled = false;
+          uploadBtn.disabled = false;
+        } catch (e) {
+          scanStatusEl.textContent = "error";
+          showError(e.message);
+        }
+      });
+
+      uploadBtn.addEventListener("click", async () => {
+        clearError();
+        if (!scanId) return showError("Start a scan first.");
+        const file = fileInput.files?.[0];
+        if (!file) return showError("Choose an image file.");
+
+        origImg.src = URL.createObjectURL(file);
+        scanStatusEl.textContent = "uploading…";
+
+        const form = new FormData();
+        form.append("file", file);
+
+        try {
+          const res = await apiFetch(`/scan/upload/${scanId}`, {
+            method: "POST",
+            body: form,
+          });
+
+          scanStatusEl.textContent = res.status || "completed";
+
+          if (res.mask_url) {
+            maskImg.src = renderImage(res.mask_url);
+            maskUrlA.textContent = res.mask_url;
+            maskUrlA.href = res.mask_url;
+          }
+
+          colorVal.textContent = res.extracted_color ?? "—";
+          colorConf.textContent = res.color_confidence ?? "—";
+
+          paletteList.innerHTML = "";
+          (res.color_palette || []).forEach((c) => {
+            const li = document.createElement("li");
+            li.textContent = c;
+            paletteList.appendChild(li);
+          });
+
+          createdIds.innerHTML = "";
+          (res.wardrobe_item_ids || []).forEach((id) => {
+            const li = document.createElement("li");
+            li.className = "mono";
+            li.textContent = id;
+            createdIds.appendChild(li);
+          });
+        } catch (e) {
+          scanStatusEl.textContent = "error";
+          showError(e.message);
+        }
+      });
+    </script>
+  </body>
+</html>
