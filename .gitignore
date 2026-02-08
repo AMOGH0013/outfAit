@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+
+# Virtual envs
+.venv/
+venv/
+ENV/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local runtime artifacts
+uploads/
+app/uploads/
+logs/
+cache/
+
+# Local databases
+*.db
+*.db-journal
+
+# Large model weights / artifacts (use Git LFS if you really need them tracked)
+sam_models/*.pth
+sam_models/*.pt
+sam_models/*.onnx
+
+# Evaluation outputs (keep evaluation code in git; ignore generated artifacts)
+evaluation/*.csv
+evaluation/*_timeseries.csv
+evaluation/summary.json
+evaluation/report.md
+
+# Archives / scratch
+*.zip
+py_write_test.txt

@@ -1,0 +1,75 @@
+[
+  {
+    "user_id": "synthetic_u1_minimalist",
+    "profile": { "body_shape": "athletic", "fit_preference": "regular", "skin_tone": "medium" },
+    "style_bias": {
+      "preferred_colors": ["black", "navy", "gray"],
+      "preferred_item_types": ["shirt", "tshirt", "chinos"],
+      "avoid_colors": ["pink", "yellow"]
+    }
+  },
+  {
+    "user_id": "synthetic_u2_bright",
+    "profile": { "body_shape": "triangle", "fit_preference": "slim", "skin_tone": "fair" },
+    "style_bias": {
+      "preferred_colors": ["red", "white", "blue"],
+      "preferred_item_types": ["tshirt", "kurta", "jeans"],
+      "avoid_colors": ["brown", "beige"]
+    }
+  },
+  {
+    "user_id": "synthetic_u3_earthy",
+    "profile": { "body_shape": "broad", "fit_preference": "loose", "skin_tone": "olive" },
+    "style_bias": {
+      "preferred_colors": ["olive", "brown", "beige"],
+      "preferred_item_types": ["hoodie", "tshirt", "trousers"],
+      "avoid_colors": ["purple", "pink"]
+    }
+  },
+  {
+    "user_id": "synthetic_u4_formal",
+    "profile": { "body_shape": "rectangle", "fit_preference": "regular", "skin_tone": "medium" },
+    "style_bias": {
+      "preferred_colors": ["navy", "white", "gray"],
+      "preferred_item_types": ["shirt", "trousers", "chinos"],
+      "avoid_colors": ["yellow", "green"]
+    }
+  },
+  {
+    "user_id": "synthetic_u5_sporty",
+    "profile": { "body_shape": "average", "fit_preference": "regular", "skin_tone": "brown" },
+    "style_bias": {
+      "preferred_colors": ["black", "green", "gray"],
+      "preferred_item_types": ["hoodie", "tshirt", "shorts"],
+      "avoid_colors": ["beige", "white"]
+    }
+  },
+  {
+    "user_id": "synthetic_u6_monochrome",
+    "profile": { "body_shape": "slim", "fit_preference": "slim", "skin_tone": "very_fair" },
+    "style_bias": {
+      "preferred_colors": ["black", "white", "gray"],
+      "preferred_item_types": ["shirt", "tshirt", "jeans"],
+      "avoid_colors": ["red", "yellow"]
+    }
+  },
+  {
+    "user_id": "synthetic_u7_warm",
+    "profile": { "body_shape": "oval", "fit_preference": "loose", "skin_tone": "dark" },
+    "style_bias": {
+      "preferred_colors": ["brown", "beige", "red"],
+      "preferred_item_types": ["kurta", "shirt", "trousers"],
+      "avoid_colors": ["blue", "purple"]
+    }
+  },
+  {
+    "user_id": "synthetic_u8_cool",
+    "profile": { "body_shape": "inverted_triangle", "fit_preference": "regular", "skin_tone": "medium" },
+    "style_bias": {
+      "preferred_colors": ["blue", "navy", "white"],
+      "preferred_item_types": ["tshirt", "hoodie", "jeans"],
+      "avoid_colors": ["orange", "yellow"]
+    }
+  }
+]
+
