@@ -13,20 +13,24 @@
         <a class="link" href="/">Home</a>
       </header>
 
-      <section class="panel">
-        <div class="row wrap">
-          <div>
-            <div class="muted small">Personalization level</div>
-            <div class="row wrap" style="justify-content:flex-start">
-              <span id="persBadge" class="badge">—</span>
-              <span id="persHint" class="muted small"></span>
-            </div>
-          </div>
-          <div style="flex: 1"></div>
-          <a class="btn secondary" href="/frontend/profile.html">Edit profile</a>
-        </div>
-        <div id="persChecks" class="checks"></div>
-      </section>
+       <section class="panel">
+         <div class="row wrap">
+           <div>
+             <div class="muted small">Personalization level</div>
+             <div class="row wrap" style="justify-content:flex-start">
+               <span id="persBadge" class="badge">—</span>
+               <span id="persHint" class="muted small"></span>
+             </div>
+           </div>
+           <div style="flex: 1"></div>
+           <a class="btn secondary" href="/frontend/profile.html">Edit profile</a>
+         </div>
+         <div id="persChecks" class="checks"></div>
+         <div id="styleBox" class="hidden" style="margin-top: 12px">
+           <div class="muted small" style="font-weight: 700">Your style (learned so far)</div>
+           <ul id="styleList" class="muted small" style="margin: 8px 0 0 18px"></ul>
+         </div>
+       </section>
 
       <section class="panel">
         <div class="row wrap">
@@ -61,16 +65,19 @@
       const errorBox = document.getElementById("errorBox");
       const wardrobeMsg = document.getElementById("wardrobeMsg");
 
-      const persBadge = document.getElementById("persBadge");
-      const persHint = document.getElementById("persHint");
-      const persChecks = document.getElementById("persChecks");
+       const persBadge = document.getElementById("persBadge");
+       const persHint = document.getElementById("persHint");
+       const persChecks = document.getElementById("persChecks");
+       const styleBox = document.getElementById("styleBox");
+       const styleList = document.getElementById("styleList");
 
       startDate.value = fmtDateISO(new Date());
 
       let wardrobeState = { map: new Map(), tops: [], bottoms: [] };
-      let wardrobeDisplayMap = new Map(); // may include inactive items for rendering historical outfits
-      let bodyProfile = null;
-      let feedbackTouched = false;
+       let wardrobeDisplayMap = new Map(); // may include inactive items for rendering historical outfits
+       let bodyProfile = null;
+       let styleProfile = null;
+       let feedbackTouched = false;
 
       function showError(msg) {
         errorBox.textContent = msg;
@@ -120,16 +127,47 @@
         });
       }
 
-      async function refreshPersonalization() {
-        try {
-          bodyProfile = await apiFetch("/body-profile", { method: "GET" });
-        } catch (e) {
-          bodyProfile = null;
-        }
-        const hasFeedback = feedbackTouched || hasFeedbackSignalFromWardrobe();
-        const status = computePersonalizationStatus(bodyProfile, hasFeedback);
-        renderPersonalization(status);
-      }
+       async function refreshPersonalization() {
+         try {
+           bodyProfile = await apiFetch("/body-profile", { method: "GET" });
+         } catch (e) {
+           bodyProfile = null;
+         }
+         try {
+           styleProfile = await apiFetch("/style-profile", { method: "GET" });
+         } catch (e) {
+           styleProfile = null;
+         }
+         const hasFeedback = feedbackTouched || hasFeedbackSignalFromWardrobe();
+         const status = computePersonalizationStatus(bodyProfile, hasFeedback);
+         renderPersonalization(status);
+         renderStyleSummary(styleProfile);
+       }
+
+       function renderStyleSummary(sp) {
+         if (!styleBox || !styleList) return;
+         if (!sp || typeof sp !== "object") {
+           styleBox.classList.add("hidden");
+           styleList.innerHTML = "";
+           return;
+         }
+
+         const basedOn = Number(sp.based_on_outfits || 0);
+         const topColors = Array.isArray(sp.preferred_top_colors) ? sp.preferred_top_colors : [];
+         const bottomColors = Array.isArray(sp.preferred_bottom_colors) ? sp.preferred_bottom_colors : [];
+         const topTypes = Array.isArray(sp.preferred_top_types) ? sp.preferred_top_types : [];
+         const bottomTypes = Array.isArray(sp.preferred_bottom_types) ? sp.preferred_bottom_types : [];
+
+         const rows = [];
+         rows.push(`Based on: ${basedOn} feedback-linked outfit(s)`);
+         if (topColors.length) rows.push(`Top colors: ${topColors.join(", ")}`);
+         if (bottomColors.length) rows.push(`Bottom colors: ${bottomColors.join(", ")}`);
+         if (topTypes.length) rows.push(`Top types: ${topTypes.join(", ")}`);
+         if (bottomTypes.length) rows.push(`Bottom types: ${bottomTypes.join(", ")}`);
+
+         styleList.innerHTML = rows.map((r) => `<li>${r}</li>`).join("");
+         styleBox.classList.remove("hidden");
+       }
 
       async function refreshWardrobeMap() {
         const res = await apiFetch("/wardrobe?include_inactive=false");
@@ -228,11 +266,13 @@
         const fb = expl.feedback_bias ?? "—";
         const ed = expl.embedding_diversity_score ?? "—";
         const fs = expl.fit_score ?? "—";
+        const sa = expl.style_affinity_score ?? "—";
         breakdown.innerHTML = `
           <div><span class="k">rule_score</span> <span class="mono">${rs}</span></div>
           <div><span class="k">feedback bias</span> <span class="mono">${fb}</span></div>
           <div><span class="k">embedding diversity</span> <span class="mono">${ed}</span></div>
           <div><span class="k">fit_score</span> <span class="mono">${fs}</span></div>
+          <div><span class="k">style affinity</span> <span class="mono">${sa}</span></div>
         `;
         card.appendChild(breakdown);
 

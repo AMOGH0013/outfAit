@@ -42,6 +42,7 @@ function summarizeExplanation(expl) {
   const fitScore = Number(expl.fit_score ?? 0);
   const embScore = Number(expl.embedding_diversity_score ?? 0);
   const fbBias = Number(expl.feedback_bias ?? 0);
+  const styleScore = Number(expl.style_affinity_score ?? 0);
 
   const reasoning = expl.reasoning && typeof expl.reasoning === "object" ? expl.reasoning : {};
 
@@ -60,6 +61,10 @@ function summarizeExplanation(expl) {
   // Feedback bias
   if (fbBias > 0.01) positives.push("your past feedback boosts similar combinations");
   if (fbBias < -0.01) cautions.push("your past feedback penalizes similar combinations");
+
+  // Style affinity
+  if (styleScore > 0.01) positives.push("it matches your learned style preferences");
+  if (styleScore < -0.01) cautions.push("it may not match your learned style preferences");
 
   if (positives.length === 0 && cautions.length === 0) {
     return "This is a balanced, neutral recommendation.";
